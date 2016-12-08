@@ -93,7 +93,8 @@ class DCGAN(object):
         #else:
 
         self.G = self.generator(self.z)
-        self.D = self.discriminator(self.images, self.G)
+        #self.D = self.discriminator(self.images, self.G)
+        self.D = self.discriminator(self.G)
 
         self.sampler = self.sampler(self.z)
         #self.D_, self.D_logits_ = self.discriminator(self.G, reuse=True)
@@ -103,10 +104,18 @@ class DCGAN(object):
         #self.d__sum = tf.histogram_summary("d_", self.D_)
         self.G_sum = tf.image_summary("G", self.G)
 
-        self.coeffs = tf.nn.softmax(-self.D, dim=-1)
+        # original formulation
+        #self.coeffs = tf.nn.softmax(-self.D, dim=-1)
+        #self.dists = tf.pow(tf.expand_dims(self.G, 1) - tf.expand_dims(self.images, 0), 2)
+        #self.components = tf.reduce_sum(tf.reshape(self.dists, [self.batch_size, self.batch_size, -1]), 2)
+        #self.log_loss = -tf.reduce_mean(tf.reduce_logsumexp(tf.log(self.coeffs) - self.components, 0))
+        #self.log_loss_sum = tf.scalar_summary("log_loss", self.log_loss)
+
+        # new formultaion
+        self.coeffs = tf.nn.softmax(self.D, dim=0)
         self.dists = tf.pow(tf.expand_dims(self.G, 1) - tf.expand_dims(self.images, 0), 2)
         self.components = tf.reduce_sum(tf.reshape(self.dists, [self.batch_size, self.batch_size, -1]), 2)
-        self.log_loss = -tf.reduce_mean(tf.reduce_logsumexp(tf.log(self.coeffs) - self.components, 0))
+        self.log_loss = -tf.reduce_mean(tf.reduce_logsumexp(self.D - tf.reduce_logsumexp(self.D, 0) - self.components, 0))
         self.log_loss_sum = tf.scalar_summary("log_loss", self.log_loss)
 
         #self.d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.D_logits, tf.ones_like(self.D)))
@@ -268,7 +277,8 @@ class DCGAN(object):
                 if np.mod(counter, 500) == 2:
                     self.save(config.checkpoint_dir, counter)
 
-    def discriminator(self, image, image_, y=None, reuse=False):
+    #def discriminator(self, image, image_, y=None, reuse=False):
+    def discriminator(self, image, y=None, reuse=False):
         #if reuse:
         #    tf.get_variable_scope().reuse_variables()
 
@@ -276,21 +286,23 @@ class DCGAN(object):
         h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
         h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim, name='d_h1_conv')))
         h2 = lrelu(self.d_bn2(conv2d(h1, self.dfc_dim, name='d_h2_conv')))
-        #h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
+        ##h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
 
-        h4 = linear(tf.reshape(h2, [self.batch_size, -1]), self.df_dim, 'd_h4_lin')
+        # new formulation
+        h6 = linear(tf.reshape(h2, [self.batch_size, -1]), 1, 'd_h4_lin')
 
-        h0 = lrelu(conv2d(image_, self.df_dim, name='d_h0_conv_'))
-        h1 = lrelu(self.d_bn1_(conv2d(h0, self.df_dim, name='d_h1_conv_')))
-        h2 = lrelu(self.d_bn2_(conv2d(h1, self.dfc_dim, name='d_h2_conv_')))
-        #h3 = lrelu(self.d_bn3_(conv2d(h2, self.df_dim*8, name='d_h3_conv_')))
+        # original formulation
+        #h0 = lrelu(conv2d(image_, self.df_dim, name='d_h0_conv_'))
+        #h1 = lrelu(self.d_bn1_(conv2d(h0, self.df_dim, name='d_h1_conv_')))
+        #h2 = lrelu(self.d_bn2_(conv2d(h1, self.dfc_dim, name='d_h2_conv_')))
+        ##h3 = lrelu(self.d_bn3_(conv2d(h2, self.df_dim*8, name='d_h3_conv_')))
 
-        h4_ = linear(tf.reshape(h2, [self.batch_size, -1]), self.df_dim, 'd_h4_lin_')
+        #h4_ = linear(tf.reshape(h2, [self.batch_size, -1]), self.df_dim, 'd_h4_lin_')
 
-        h5 = lrelu(tf.add(tf.expand_dims(h4, 0), tf.expand_dims(h4_, 1)))
-        h6 = tf.reshape(linear(tf.reshape(h5, [self.batch_size*self.batch_size, -1]), 
-                        1, 'd_h5_lin'), 
-                        [self.batch_size, self.batch_size, -1])
+        #h5 = lrelu(tf.add(tf.expand_dims(h4, 0), tf.expand_dims(h4_, 1)))
+        #h6 = tf.reshape(linear(tf.reshape(h5, [self.batch_size*self.batch_size, -1]), 
+        #                1, 'd_h5_lin'), 
+        #                [self.batch_size, self.batch_size, -1])
 
         return h6
         #else:
