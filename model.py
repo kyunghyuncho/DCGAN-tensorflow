@@ -106,7 +106,7 @@ class DCGAN(object):
         self.coeffs = tf.nn.softmax(self.D, dim=-1)
         self.dists = tf.pow(tf.expand_dims(self.G, 0) - tf.expand_dims(self.images, 1), 2)
         self.components = tf.reduce_sum(tf.reshape(self.dists,[self.batch_size, self.batch_size, -1]), 2)
-        self.log_loss = tf.reduce_mean(tf.reduce_logsumexp(tf.log(self.coeffs) + self.components, 1))
+        self.log_loss = -tf.reduce_mean(tf.reduce_logsumexp(tf.log(self.coeffs) - self.components, 1))
         self.log_loss_sum = tf.scalar_summary("log_loss", self.log_loss)
 
         #self.d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.D_logits, tf.ones_like(self.D)))
