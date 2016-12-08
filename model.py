@@ -103,8 +103,8 @@ class DCGAN(object):
         #self.d__sum = tf.histogram_summary("d_", self.D_)
         self.G_sum = tf.image_summary("G", self.G)
 
-        self.coeffs = tf.nn.softmax(self.D, dim=-1)
-        self.dists = tf.pow(tf.expand_dims(self.G, 0) - tf.expand_dims(self.images, 1), 2)
+        self.coeffs = tf.nn.softmax(-self.D, dim=-1)
+        self.dists = tf.pow(tf.expand_dims(self.G, 1) - tf.expand_dims(self.images, 0), 2)
         self.components = tf.reduce_sum(tf.reshape(self.dists,[self.batch_size, self.batch_size, -1]), 2)
         self.log_loss = -tf.reduce_mean(tf.reduce_logsumexp(tf.log(self.coeffs) - self.components, 1))
         self.log_loss_sum = tf.scalar_summary("log_loss", self.log_loss)
@@ -269,8 +269,8 @@ class DCGAN(object):
                     self.save(config.checkpoint_dir, counter)
 
     def discriminator(self, image, image_, y=None, reuse=False):
-        if reuse:
-            tf.get_variable_scope().reuse_variables()
+        #if reuse:
+        #    tf.get_variable_scope().reuse_variables()
 
         #if not self.y_dim:
         h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
@@ -287,9 +287,7 @@ class DCGAN(object):
 
         h4_ = linear(tf.reshape(h2, [self.batch_size, -1]), self.df_dim, 'd_h4_lin_')
 
-        h4 = tf.add(tf.expand_dims(h4, 0), tf.expand_dims(h4, 1))
-
-        h5 = lrelu(h4 + h4_)
+        h5 = lrelu(tf.add(tf.expand_dims(h4, 0), tf.expand_dims(h4_, 1)))
         h6 = tf.reshape(linear(tf.reshape(h5, [self.batch_size*self.batch_size, -1]), 
                         1, 'd_h5_lin'), 
                         [self.batch_size, self.batch_size, -1])
