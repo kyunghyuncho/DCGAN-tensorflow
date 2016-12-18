@@ -113,9 +113,11 @@ class DCGAN(object):
 
         # new formultaion
         self.coeffs = tf.nn.softmax(self.D, dim=0)
-        self.dists = tf.pow(tf.expand_dims(self.G, 1) - tf.expand_dims(self.images, 0), 2)
+        #self.dists = -tf.pow(tf.expand_dims(self.G, 1) - tf.expand_dims(self.images, 0), 2)
+        self.dists = (tf.log(tf.expand_dims(self.G, 1)) * tf.expand_dims(self.images, 0) + 
+                     tf.log(1. - tf.expand_dims(self.G, 1)) * (1. - tf.expand_dims(self.images, 0)))
         self.components = tf.reduce_sum(tf.reshape(self.dists, [self.batch_size, self.batch_size, -1]), 2)
-        self.log_loss = -tf.reduce_mean(tf.reduce_logsumexp(self.D - tf.reduce_logsumexp(self.D, 0) - self.components, 0))
+        self.log_loss = -tf.reduce_mean(tf.reduce_logsumexp(self.D - tf.reduce_logsumexp(self.D, 0) + self.components, 0))
         self.log_loss_sum = tf.scalar_summary("log_loss", self.log_loss)
 
         #self.d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.D_logits, tf.ones_like(self.D)))
@@ -145,8 +147,10 @@ class DCGAN(object):
             data = glob(os.path.join("./data", config.dataset, "*.jpg"))
         #np.random.shuffle(data)
 
-        optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
+        optim = tf.train.AdamOptimizer(config.learning_rate) \
                         .minimize(self.log_loss, var_list=self.t_vars)
+        #optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
+        #                .minimize(self.log_loss, var_list=self.t_vars)
         #d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
         #                  .minimize(self.d_loss, var_list=self.d_vars)
         #g_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
@@ -202,12 +206,12 @@ class DCGAN(object):
                 batch_z = np.random.uniform(-1, 1, [config.batch_size, self.z_dim]) \
                             .astype(np.float32)
 
-                if config.dataset == 'mnist':
-                    _, summary_str = self.sess.run([optim, self._sum],
-                        feed_dict={ self.images: batch_images, 
-                                    self.z: batch_z })
-                        #, self.y:batch_labels })
-                    self.writer.add_summary(summary_str, counter)
+                #if config.dataset == 'mnist':
+                _, summary_str = self.sess.run([optim, self._sum],
+                    feed_dict={ self.images: batch_images, 
+                                self.z: batch_z })
+                    #, self.y:batch_labels })
+                self.writer.add_summary(summary_str, counter)
 
                     ## Update D network
                     #_, summary_str = self.sess.run([d_optim, self.d_sum],
@@ -227,27 +231,27 @@ class DCGAN(object):
                     #errD_fake = self.d_loss_fake.eval({self.z: batch_z, self.y:batch_labels})
                     #errD_real = self.d_loss_real.eval({self.images: batch_images, self.y:batch_labels})
                     #errG = self.g_loss.eval({self.z: batch_z, self.y:batch_labels})
-                    err = self.log_loss.eval({self.z: batch_z, self.images: batch_images})
+                err = self.log_loss.eval({self.z: batch_z, self.images: batch_images})
                     #, self.y:batch_labels})
-                else:
-                    # Update D network
-                    _, summary_str = self.sess.run([d_optim, self.d_sum],
-                        feed_dict={ self.images: batch_images, self.z: batch_z })
-                    self.writer.add_summary(summary_str, counter)
+                #else:
+                #    # Update D network
+                #    _, summary_str = self.sess.run([d_optim, self.d_sum],
+                #        feed_dict={ self.images: batch_images, self.z: batch_z })
+                #    self.writer.add_summary(summary_str, counter)
 
-                    # Update G network
-                    _, summary_str = self.sess.run([g_optim, self.g_sum],
-                        feed_dict={ self.z: batch_z })
-                    self.writer.add_summary(summary_str, counter)
+                #    # Update G network
+                #    _, summary_str = self.sess.run([g_optim, self.g_sum],
+                #        feed_dict={ self.z: batch_z })
+                #    self.writer.add_summary(summary_str, counter)
 
-                    # Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
-                    _, summary_str = self.sess.run([g_optim, self.g_sum],
-                        feed_dict={ self.z: batch_z })
-                    self.writer.add_summary(summary_str, counter)
-                    
-                    errD_fake = self.d_loss_fake.eval({self.z: batch_z})
-                    errD_real = self.d_loss_real.eval({self.images: batch_images})
-                    errG = self.g_loss.eval({self.z: batch_z})
+                #    # Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
+                #    _, summary_str = self.sess.run([g_optim, self.g_sum],
+                #        feed_dict={ self.z: batch_z })
+                #    self.writer.add_summary(summary_str, counter)
+                #    
+                #    errD_fake = self.d_loss_fake.eval({self.z: batch_z})
+                #    errD_real = self.d_loss_real.eval({self.images: batch_images})
+                #    errG = self.g_loss.eval({self.z: batch_z})
 
                 counter += 1
                 #print("Epoch: [%2d] [%4d/%4d] time: %4.4f, d_loss: %.8f, g_loss: %.8f" \
@@ -258,18 +262,18 @@ class DCGAN(object):
                         time.time() - start_time, err))
 
                 if np.mod(counter, 100) == 1:
-                    if config.dataset == 'mnist':
-                        samples, log_loss = self.sess.run(
-                            [self.sampler, self.log_loss],
-                            feed_dict={self.z: sample_z, 
-                                       self.images: sample_images}
-                            #, self.y:batch_labels}
-                        )
-                    else:
-                        samples, d_loss, g_loss = self.sess.run(
-                            [self.sampler, self.d_loss, self.g_loss],
-                            feed_dict={self.z: sample_z, self.images: sample_images}
-                        )
+                    #if config.dataset == 'mnist':
+                    samples, log_loss = self.sess.run(
+                        [self.sampler, self.log_loss],
+                        feed_dict={self.z: sample_z, 
+                                   self.images: sample_images}
+                        #, self.y:batch_labels}
+                    )
+                    #else:
+                    #    samples, d_loss, g_loss = self.sess.run(
+                    #        [self.sampler, self.d_loss, self.g_loss],
+                    #        feed_dict={self.z: sample_z, self.images: sample_images}
+                    #    )
                     save_images(samples, [8, 8],
                                 './{}/train_{:02d}_{:04d}.png'.format(config.sample_dir, epoch, idx))
                     print("[Sample] log_loss: %.8f" % (log_loss))
@@ -283,6 +287,9 @@ class DCGAN(object):
         #    tf.get_variable_scope().reuse_variables()
 
         #if not self.y_dim:
+
+        #image = tf.stop_gradient(image)
+
         h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
         h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim, name='d_h1_conv')))
         h2 = lrelu(self.d_bn2(conv2d(h1, self.dfc_dim, name='d_h2_conv')))
@@ -452,7 +459,7 @@ class DCGAN(object):
         for i, label in enumerate(y):
             y_vec[i,y[i]] = 1.0
         
-        return X/255.,y_vec
+        return np.round(X/255.),y_vec
             
     def save(self, checkpoint_dir, step):
         model_name = "DCGAN.model"
