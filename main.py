@@ -8,11 +8,12 @@ from utils import pp, visualize, to_json
 import tensorflow as tf
 
 flags = tf.app.flags
-flags.DEFINE_integer("epoch", 25, "Epoch to train [25]")
-flags.DEFINE_float("learning_rate", 0.0002, "Learning rate of for adam [0.0002]")
+flags.DEFINE_integer("epoch", 100, "Epoch to train [100]")
+flags.DEFINE_float("learning_rate", 0.001, "Learning rate of for adam [0.0002]")
 flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")
 flags.DEFINE_integer("train_size", np.inf, "The size of train images [np.inf]")
 flags.DEFINE_integer("batch_size", 64, "The size of batch images [64]")
+flags.DEFINE_integer("n_cmps", 128, "# of components [128]")
 #flags.DEFINE_integer("image_size", 108, "The size of image to use (will be center cropped) [108]")
 flags.DEFINE_integer("image_size", 28, "The size of image to use (will be center cropped) [108]")
 #flags.DEFINE_integer("output_size", 64, "The size of the output images to produce [64]")
@@ -41,7 +42,8 @@ def main(_):
         #    dcgan = DCGAN(sess, image_size=FLAGS.image_size, batch_size=FLAGS.batch_size, y_dim=10, output_size=28, c_dim=1,
         #            dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=FLAGS.checkpoint_dir, sample_dir=FLAGS.sample_dir)
         #else:
-        dcgan = DCGAN(sess, image_size=FLAGS.image_size, batch_size=FLAGS.batch_size, output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,
+        dcgan = DCGAN(sess, image_size=FLAGS.image_size, batch_size=FLAGS.batch_size, 
+                n_cmps=FLAGS.n_cmps, output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,
                 dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=FLAGS.checkpoint_dir, sample_dir=FLAGS.sample_dir,
                 _reload=FLAGS._reload)
 

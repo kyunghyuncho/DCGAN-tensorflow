@@ -6,12 +6,15 @@ import tensorflow as tf
 import numpy as np
 from six.moves import xrange
 
+import scipy.misc
+
 from ops import *
 from utils import *
 
 class DCGAN(object):
     def __init__(self, sess, image_size=108, is_crop=True,
                  batch_size=64, sample_size = 64, output_size=64,
+                 n_cmps=128,
                  y_dim=None, z_dim=100, gf_dim=64, df_dim=64,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
                  checkpoint_dir=None, sample_dir=None, _reload=False):
@@ -33,6 +36,7 @@ class DCGAN(object):
         self.is_crop = is_crop
         self.is_grayscale = (c_dim == 1)
         self.batch_size = batch_size
+        self.n_cmps = n_cmps
         self.image_size = image_size
         self.sample_size = sample_size
         self.output_size = output_size
@@ -116,8 +120,9 @@ class DCGAN(object):
         #self.dists = -tf.pow(tf.expand_dims(self.G, 1) - tf.expand_dims(self.images, 0), 2)
         self.dists = (tf.log(tf.expand_dims(self.G, 1)) * tf.expand_dims(self.images, 0) + 
                      tf.log(1. - tf.expand_dims(self.G, 1)) * (1. - tf.expand_dims(self.images, 0)))
-        self.components = tf.reduce_sum(tf.reshape(self.dists, [self.batch_size, self.batch_size, -1]), 2)
-        self.log_loss = -tf.reduce_mean(tf.reduce_logsumexp(self.D - tf.reduce_logsumexp(self.D, 0) + self.components, 0))
+        self.components = tf.reduce_sum(tf.reshape(self.dists, [self.n_cmps, self.batch_size, -1]), 2)
+        self.log_loss_ex = tf.reduce_logsumexp(self.D - tf.reduce_logsumexp(self.D, 0, keep_dims=True)[0] + self.components, 0, keep_dims=True)[0]
+        self.log_loss = -tf.reduce_mean(tf.reduce_logsumexp(self.D - tf.reduce_logsumexp(self.D, 0, keep_dims=True)[0] + self.components, 0, keep_dims=True)[0], 0)
         self.log_loss_sum = tf.scalar_summary("log_loss", self.log_loss)
 
         #self.d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.D_logits, tf.ones_like(self.D)))
@@ -142,7 +147,7 @@ class DCGAN(object):
     def train(self, config):
         """Train DCGAN"""
         if config.dataset == 'mnist':
-            data_X, data_y = self.load_mnist()
+            data_X, data_y, test_X = self.load_mnist()
         else:
             data = glob(os.path.join("./data", config.dataset, "*.jpg"))
         #np.random.shuffle(data)
@@ -163,7 +168,7 @@ class DCGAN(object):
         #self.d_sum = tf.merge_summary([self.z_sum, self.d_sum, self.d_loss_real_sum, self.d_loss_sum])
         self.writer = tf.train.SummaryWriter("./logs", self.sess.graph)
 
-        sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
+        sample_z = np.random.uniform(-1, 1, size=(self.sample_size, self.z_dim))
         
         if config.dataset == 'mnist':
             sample_images = data_X[0:self.sample_size]
@@ -187,6 +192,7 @@ class DCGAN(object):
         for epoch in xrange(config.epoch):
             if config.dataset == 'mnist':
                 batch_idxs = min(len(data_X), config.train_size) // config.batch_size
+                batch_idxs_te = min(len(test_X), config.train_size) // config.batch_size
             else:            
                 data = glob(os.path.join("./data", config.dataset, "*.jpg"))
                 batch_idxs = min(len(data), config.train_size) // config.batch_size
@@ -203,7 +209,7 @@ class DCGAN(object):
                     else:
                         batch_images = np.array(batch).astype(np.float32)
 
-                batch_z = np.random.uniform(-1, 1, [config.batch_size, self.z_dim]) \
+                batch_z = np.random.uniform(-1, 1, [config.n_cmps, self.z_dim]) \
                             .astype(np.float32)
 
                 #if config.dataset == 'mnist':
@@ -257,16 +263,31 @@ class DCGAN(object):
                 #print("Epoch: [%2d] [%4d/%4d] time: %4.4f, d_loss: %.8f, g_loss: %.8f" \
                 #    % (epoch, idx, batch_idxs,
                 #        time.time() - start_time, errD_fake+errD_real, errG))
-                print("Epoch: [%2d] [%4d/%4d] time: %4.4f, log_loss: %.8f" \
-                    % (epoch, idx, batch_idxs,
-                        time.time() - start_time, err))
-
                 if np.mod(counter, 100) == 1:
+                    print("Epoch: [%2d] [%4d/%4d] time: %4.4f, log_loss: %.8f" \
+                        % (epoch, idx, batch_idxs,
+                            time.time() - start_time, err))
+
+                if np.mod(counter, 1000) == 1:
+                    n_ens = 10
+                    batch_z = np.random.uniform(-1, 1, [n_ens, self.n_cmps, self.z_dim]) \
+                                .astype(np.float32)
+                    ll = 0.
+                    for idx in xrange(0, batch_idxs_te):
+                        batch_images = test_X[idx*config.batch_size:(idx+1)*config.batch_size]
+                        logp_all = np.zeros((len(batch_images), n_ens))
+                        for mog in xrange(n_ens):
+                            my_z = batch_z[mog,:,:]
+                            logp = self.log_loss_ex.eval({self.z: my_z, self.images: batch_images})
+                            logp_all[:, mog] = logp
+                        ll += np.sum(scipy.misc.logsumexp(logp_all, 1) - np.log(np.float(n_ens)))
+                    ll /= len(test_X)
+                    print("[NLL] log_loss: %.8f" % (-ll))
+
                     #if config.dataset == 'mnist':
-                    samples, log_loss = self.sess.run(
-                        [self.sampler, self.log_loss],
-                        feed_dict={self.z: sample_z, 
-                                   self.images: sample_images}
+                    samples = self.sess.run(
+                        [self.sampler],
+                        feed_dict={self.z: sample_z}
                         #, self.y:batch_labels}
                     )
                     #else:
@@ -274,11 +295,10 @@ class DCGAN(object):
                     #        [self.sampler, self.d_loss, self.g_loss],
                     #        feed_dict={self.z: sample_z, self.images: sample_images}
                     #    )
-                    save_images(samples, [8, 8],
+                    save_images(samples[0], [8, 8],
                                 './{}/train_{:02d}_{:04d}.png'.format(config.sample_dir, epoch, idx))
-                    print("[Sample] log_loss: %.8f" % (log_loss))
 
-                if np.mod(counter, 500) == 2:
+                if np.mod(counter, 1000) == 2:
                     self.save(config.checkpoint_dir, counter)
 
     #def discriminator(self, image, image_, y=None, reuse=False):
@@ -296,7 +316,7 @@ class DCGAN(object):
         ##h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
 
         # new formulation
-        h6 = linear(tf.reshape(h2, [self.batch_size, -1]), 1, 'd_h4_lin')
+        h6 = linear(tf.reshape(h2, [self.n_cmps, -1]), 1, 'd_h4_lin')
 
         # original formulation
         #h0 = lrelu(conv2d(image_, self.df_dim, name='d_h0_conv_'))
@@ -369,14 +389,14 @@ class DCGAN(object):
         #h0 = tf.concat(1, [h0, y])
 
         h1 = tf.nn.relu(self.g_bn1(linear(h0, self.gf_dim*2*s4*s4, 'g_h1_lin')))
-        h1 = tf.reshape(h1, [self.batch_size, s4, s4, self.gf_dim * 2])
+        h1 = tf.reshape(h1, [self.n_cmps, s4, s4, self.gf_dim * 2])
 
         #h1 = conv_cond_concat(h1, yb)
 
-        h2 = tf.nn.relu(self.g_bn2(deconv2d(h1, [self.batch_size, s2, s2, self.gf_dim * 2], name='g_h2')))
+        h2 = tf.nn.relu(self.g_bn2(deconv2d(h1, [self.n_cmps, s2, s2, self.gf_dim * 2], name='g_h2')))
         #h2 = conv_cond_concat(h2, yb)
 
-        return tf.nn.sigmoid(deconv2d(h2, [self.batch_size, s, s, self.c_dim], name='g_h3'))
+        return tf.nn.sigmoid(deconv2d(h2, [self.n_cmps, s, s, self.c_dim], name='g_h3'))
 
     def sampler(self, z, y=None):
         tf.get_variable_scope().reuse_variables()
@@ -415,13 +435,13 @@ class DCGAN(object):
         #h0 = tf.concat(1, [h0, y])
 
         h1 = tf.nn.relu(self.g_bn1(linear(h0, self.gf_dim*2*s4*s4, 'g_h1_lin'), train=False))
-        h1 = tf.reshape(h1, [self.batch_size, s4, s4, self.gf_dim * 2])
+        h1 = tf.reshape(h1, [self.sample_size, s4, s4, self.gf_dim * 2])
         #h1 = conv_cond_concat(h1, yb)
 
-        h2 = tf.nn.relu(self.g_bn2(deconv2d(h1, [self.batch_size, s2, s2, self.gf_dim * 2], name='g_h2'), train=False))
+        h2 = tf.nn.relu(self.g_bn2(deconv2d(h1, [self.sample_size, s2, s2, self.gf_dim * 2], name='g_h2'), train=False))
         #h2 = conv_cond_concat(h2, yb)
 
-        return tf.nn.sigmoid(deconv2d(h2, [self.batch_size, s, s, self.c_dim], name='g_h3'))
+        return tf.nn.sigmoid(deconv2d(h2, [self.sample_size, s, s, self.c_dim], name='g_h3'))
 
     def load_mnist(self):
         data_dir = os.path.join("./data", self.dataset_name)
@@ -445,21 +465,21 @@ class DCGAN(object):
         trY = np.asarray(trY)
         teY = np.asarray(teY)
         
-        X = np.concatenate((trX, teX), axis=0)
-        y = np.concatenate((trY, teY), axis=0)
+        #X = np.concatenate((trX, teX), axis=0)
+        #y = np.concatenate((trY, teY), axis=0)
         
         seed = 547
         np.random.seed(seed)
-        np.random.shuffle(X)
+        np.random.shuffle(trX)
         np.random.seed(seed)
-        np.random.shuffle(y)
+        np.random.shuffle(trY)
         
         self.y_dim = 10
-        y_vec = np.zeros((len(y), self.y_dim), dtype=np.float)
-        for i, label in enumerate(y):
-            y_vec[i,y[i]] = 1.0
+        y_vec = np.zeros((len(trY), self.y_dim), dtype=np.float)
+        for i, label in enumerate(trY):
+            y_vec[i,trY[i]] = 1.0
         
-        return np.round(X/255.),y_vec
+        return np.round(trX/255.),y_vec, np.round(teX/255.)
             
     def save(self, checkpoint_dir, step):
         model_name = "DCGAN.model"
